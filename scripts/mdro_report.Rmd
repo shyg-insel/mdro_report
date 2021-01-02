@@ -1,0 +1,478 @@
+---
+title: "Monatsreporting MRE - Inselgruppe"
+author: "Spitalhygiene"
+date: "Letztes update: **`r format(lubridate::today(), '%d. %B %Y')`**"
+output: 
+  word_document:
+    reference_docx: man_ref.docx
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, dpi=600, message=FALSE, 
+                      fig.width=6.3, fig.height=7.9)
+library(tidyverse)
+library(here)
+library(lubridate)
+library(glue)
+library(tableone)
+library(officer)
+library(flextable)
+library(patchwork)
+
+theme_set(ggthemes::theme_hc(base_size = 8)) 
+```
+
+
+```{r read-parse-file}
+files <- dir(here("data"), pattern = "*.csv")
+
+
+m_read_csv <- function(file) {
+  colnames <- c("befund", "nosokomial", "phanotyp", "genotyp", 
+                "entnahmegrund", "meldedatum", "entnahmedatum", 
+                "pid", "labor_befundet", "status")
+  
+  read_delim(file = here("data", file), delim = ";",
+           skip = 1,
+           col_names = colnames, 
+           col_types = cols(
+             befund = col_character(),
+             nosokomial = col_character(),
+             phanotyp = col_character(),
+             genotyp = col_character(),
+             entnahmegrund = col_character(),
+             meldedatum = col_date(format = "%d.%m.%Y"),
+             entnahmedatum = col_date(format = "%d.%m.%Y"),
+             pid = col_character(),
+             labor_befundet = col_character(),
+             status = col_character()
+           ))
+}
+
+df <- files %>% 
+  map_dfr(m_read_csv) %>% 
+  distinct()
+```
+
+
+```{r generate-groups}
+# Define variables for groups
+carbapenemase <- c("Carbapenemasebildner", "Carbapenemase-Bildner", "Panresistent und Carbapenemase-Bildner")
+pan <- c("Panresistent", "Pan", "Panresistent und ESBL-Bildner")
+
+
+df <- df %>% 
+  mutate(id = row_number()) %>% 
+  select(id, everything()) %>% 
+  mutate(group = case_when(phanotyp == "MRSA (Oxacillin / Methicillin resistent)" ~ "MRSA",
+                           phanotyp == "VRE (Vancomycin resistent)" ~ "VRE",
+                           phanotyp %in% carbapenemase ~ "Carbapenemasebildner",
+                           phanotyp %in% pan ~ "Panresistente Gram negative Keime",
+                           phanotyp == "Multiresistent" ~ "Multiresistente Gram negative Keime",
+                           phanotyp == "ESBL-Bildner" ~ "ESBL-Bildner", 
+                           genotyp %in% c("027", "27") ~ "Clostridium difficile 027",
+                           befund == "Clostridium difficile" ~ "Clostridium difficile")) 
+
+
+
+
+# Only consider groups as recoded above, rest of data is not of interest (CAVE, includes MDR TB)
+df_sub <- df %>% 
+  filter(!is.na(group))
+```
+
+
+```{r date-columns}
+df_sub <- df_sub %>% 
+  mutate(month = month(meldedatum), 
+         year = year(meldedatum),
+         m_year = glue("{month}/{year}"),
+         date = dmy(glue("01/{m_year}")))
+
+df_sub <- df_sub %>% 
+  mutate(nosokomial = str_extract(nosokomial, "[Jj]a|[Nn]ein"),
+         nosokomial = str_to_title(nosokomial))
+```
+
+
+```{r select-report-dataframe}
+df_report <- df_sub %>% 
+  select(id, month, year, keim = befund, group,  nosokomial, m_year, date)
+```
+
+<br>
+
+<br>
+
+
+# Übersicht
+
+## Übersicht allgmein
+
+```{r overview-tables}
+var <- c("year", "group", "nosokomial")
+b <- fp_border(color="black", width = 0.5)
+
+CreateTableOne(vars = var,data = df_report,
+               includeNA = TRUE, test = FALSE) %>% 
+  print(nonnormal = "year", contDigits = 0, 
+        printToggle = FALSE, quote = "FALSE", noSpaces = TRUE) %>% 
+  as_tibble(rownames = "variables") %>% 
+  mutate(variables = str_squish(variables)) %>%
+  filter(!variables %in% c("group (%)", "nosokomial (%)")) %>% 
+  mutate(variables = if_else(variables %in% c("n", "year (median [IQR])"), 
+                             "", variables),
+         variables = if_else(str_detect(variables, "NA"), 
+                             "Missing", variables)) %>% 
+  mutate(group = c("N", "Year (IQR)", 
+                   rep("Erregergruppe (%)", 8), 
+                   rep("Nosokomial (%)", 3)),
+         Overall = str_replace(Overall, "\\[", "\\("), 
+         Overall = str_replace(Overall, "\\]", "\\)"), 
+         Overall = str_replace(Overall, "\\, ", " - ")) %>% 
+  select(group, everything()) %>% 
+  flextable() %>% 
+  merge_v() %>% 
+  valign(j = 1, valign = "top") %>% 
+  set_header_labels(group = "Variable", variables = "Kategorie") %>% 
+  border_remove() %>% 
+  hline(i = 1, border = b, part = "header") %>% 
+  hline_top(border = b, part = "header") %>% 
+  hline_bottom(border = b, part = "body") %>% 
+  border_outer(border = b) %>% 
+  align(j = "Overall", align = "center", part = "all") %>% 
+  fix_border_issues() %>% 
+  bold(part = "header") %>% 
+  fontsize(size = 10, part = "body") %>% 
+  font(fontname = "Arial Narrow", part = "all") %>% 
+  width(j = 1, width = 1.2) %>% 
+  width(j = 2, width =2.1) %>% 
+  width(j = 3, width = 1.2)
+```
+
+<br>
+
+<br>
+
+
+## Übersicht (stratifiziert nach Jahren)
+
+```{r overview-year-tables}
+CreateTableOne(vars = var, strata = "year", data = df_report %>% filter(year >= 2017), 
+               includeNA = TRUE, test = FALSE, ) %>% 
+  print(nonnormal = "year", contDigits = 0, printToggle = FALSE, quote = "FALSE") %>%
+  as_tibble(rownames = "variables") %>% 
+  mutate(variables = str_squish(variables)) %>% 
+  filter(!variables %in% c("group (%)", "nosokomial (%)", "year (median [IQR])")) %>% 
+  mutate(variables = if_else(variables %in% c("n", "year (median [IQR])"), "", variables),
+         variables = if_else(str_detect(variables, "NA"), "Missing", variables)) %>% 
+  mutate(group = c("N", rep("Erregergruppe (%)", 8), rep("Nosokomial (%)", 3))) %>% 
+  mutate(across(`2017`:`2020`, ~str_replace(.x, "\\[", "\\(")),
+         across(`2017`:`2020`, ~str_replace(.x, "\\]", "\\)")),
+         across(`2017`:`2020`, ~str_replace(.x, "\\, ", " - "))) %>% 
+  select(group, everything()) %>% 
+  flextable() %>% 
+  merge_v() %>% 
+  valign(j = 1, valign = "top") %>% 
+  set_header_labels(group = "Variable", variables = "Kategorie") %>% 
+  border_remove() %>% 
+  hline(i = 1, border = b, part = "header") %>% 
+  hline_top(border = b, part = "header") %>% 
+  hline_bottom(border = b, part = "body") %>% 
+  border_outer(border = b) %>% 
+  align(j = 3:6, align = "center", part = "all") %>% 
+  fix_border_issues() %>% 
+  bold(part = "header") %>% 
+  fontsize(size = 10, part = "body") %>% 
+  font(fontname = "Arial Narrow", part = "all") %>% 
+  width(j = 1, width = 1.2) %>% 
+  width(j = 2, width =2.1) %>% 
+  width(j = 3:6, width = 1)
+```
+
+
+```{r functions-plots-tables}
+# Define variables so histograms automatically go until last months of year
+max_yr <- max(df_report$year)
+min_yr <- min(df_report$year)
+
+m_grid <- expand_grid(month = 1:12, 
+                      year = min_yr:max_yr, 
+                      nosokomial = c("Ja", "Nein"))
+
+
+
+cust_table <- function(df, var, start_year = 2018){
+  big_b <- fp_border(color="black", width = 0.5)
+  
+  df %>% 
+    filter(group == var, 
+           year >= start_year) %>% 
+    count(group, date, nosokomial) %>% 
+    pivot_wider(names_from = "nosokomial", 
+                values_from = "n") %>% 
+    mutate(across(c("Ja", "Nein"), replace_na, 0)) %>% 
+    mutate(Jahr = year(date), 
+           Monat = month(date, label = TRUE)) %>% 
+    select(Jahr, Monat, "Gruppe" = group, 
+           "Nicht-nosokomial" = Nein, "Nosokomial" = Ja) %>% 
+    flextable() %>% 
+    font(fontname = "Arial Narrow", part = "all") %>% 
+    border_remove() %>% 
+    hline(i = 1, border = big_b, part = "header") %>% 
+    hline_top(border = big_b, part = "header") %>% 
+    hline_bottom(border = big_b, part = "body") %>% 
+    border_outer(border = big_b) %>% 
+    bold(part = "header") %>% 
+    fontsize(size = 10, part = "body") %>% 
+    autofit()
+}
+
+
+histo_plot <- function(df, var) {
+  df %>% 
+    filter(!is.na(nosokomial)) %>% 
+    filter(year >= 2017) %>% 
+    filter(group == var) %>% 
+    count(date, nosokomial) %>% 
+    # print(n = 126)
+    mutate(nosokomial = fct_relevel(nosokomial, "Nein")) %>% 
+    ggplot(aes(x = date, y = n)) + 
+    geom_col(aes(fill = nosokomial), color = NA) +
+    scale_x_date(limits = dmy(c("18/12/2016", glue("01/12/{max_yr}"))),
+                 date_breaks = "3 month", date_labels = "%b %Y") + 
+    scale_fill_manual(values=c('steelblue', 'red3')) +
+    labs(x = NULL, y = "Frequency\n", fill = "Nosokomial") +
+    theme(axis.text.x = element_text(angle = 90),
+          axis.title.y = element_text(angle = 90),
+          legend.position = "right")
+}
+
+by_year_plot <- function(df, var, start_year = 2015) {
+  df %>% 
+    filter(!is.na(nosokomial),
+           group == var, 
+           year >= start_year) %>%
+    count(year, month, nosokomial) %>% 
+    right_join(m_grid, by = c("year", "month", "nosokomial")) %>% 
+    mutate(n = replace_na(n, 0)) %>% 
+    mutate(month2 = month.abb[month],
+           month2 = factor(month2, levels = month.abb)) %>% 
+    
+    mutate(nosokomial = fct_relevel(nosokomial, "Nein")) %>% 
+    ggplot(aes(x = month2, y = n)) + 
+    geom_col(aes(fill = nosokomial)) +
+    geom_hline(yintercept = 0) + 
+    facet_grid(year~.) + 
+    labs(x = NULL, y = "Frequency\n", fill = "Nosokomial") +
+    scale_fill_manual(values=c('steelblue', 'red3')) +
+    theme(axis.text.x = element_text(angle = 0),
+          axis.title.y = element_text(angle = 90),
+          legend.position = "right")
+}
+
+
+
+# combine to one plot
+
+comb_plot <- function(df, var, caption = NULL) {
+  a <- histo_plot(df_report, var = var) + 
+    labs(title = glue("\n{var}: Erstbefunde Inselgruppe\n"))
+  
+  b <- by_year_plot(df_report, var = var) + 
+    labs(title = glue("\n{var}: Trend over time\n"))
+  
+  a / b +
+    plot_annotation(caption = caption) &
+    plot_layout(heights = c(1, 2)) &
+    theme(plot.title = element_text(face = "bold", hjust = 0, 
+                                    margin = margin(t = 0.7, b = 0.5, 
+                                                    unit = "cm"), 
+                                    size = 10), 
+          plot.margin = margin(0.2, 0.1, 0.5, 0.1, unit = "cm"),
+          plot.caption = element_text(hjust = 0.5))
+}
+
+
+
+# Plot to create an area graph to visualize nosokomial vs. non-nosokomial
+area_graph <- function(df, var, start_year = 2015, increment = "6 months") {
+  df_report %>% 
+    filter(!is.na(nosokomial),
+           group == var, 
+           year >= start_year) %>%
+    mutate(date = ymd(glue("{year}-{month}-1"))) %>% 
+    mutate(date2 = floor_date(date, unit = increment)) %>% 
+    group_by(date2) %>% 
+    mutate(nosokomial = factor(nosokomial, levels = c("Ja", "Nein"))) %>% 
+    count(date2, nosokomial, .drop = FALSE) %>% 
+    mutate(p = n/sum(n)) %>% 
+    ggplot(aes(x = date2, y = p)) +
+    geom_area(aes(fill = nosokomial)) + 
+    geom_hline(yintercept = 0.5, linetype = 2, size = 1.5) + 
+    scale_fill_manual(values = c("Ja" = "steelblue", "Nein" = "red3")) + 
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y",
+                 expand = c(0, 0)) + 
+    scale_y_continuous(expand = c(0, 0)) + 
+    labs(x = glue("Date (in {increment} increments)"), 
+         y = "Proportion\n", 
+         fill = "Nosokomial") +
+    theme(axis.text.x = element_text(angle = 0),
+          axis.title.y = element_text(angle = 90),
+          legend.position = "right")
+}
+
+
+```
+
+
+# ESBL-Bildner (ohne E. coli)
+
+```{r}
+var <- "ESBL-Bildner"
+comb_plot(df_report, var = var, caption = "\n(Ohne E. coli. Ab 22.02.2019: ESBL-Testung in Urinproben)")
+```
+
+
+## Tabelle: ESBL-Bildner (ohne E. coli)
+
+
+```{r esbl-tab}
+cust_table(df_report, var = var)
+```
+
+
+# MRSA
+
+
+```{r mrsa-histo}
+var <- "MRSA"
+comb_plot(df_report, var = var,
+          caption = "\n(Resistenz gegen Oxacillin / Methicillin)")
+```
+
+
+
+## Tabelle: MRSA
+
+
+```{r mrsa-tab}
+cust_table(df_report, var = var)
+```
+
+
+# Panresistente Gram-negative Keime
+
+
+```{r pan-by-year}
+var <- "Panresistente Gram negative Keime"
+
+comb_plot(df_report, var = var, 
+          caption = "\n(enthält auch panresistente ESBL-Bildner und E. coli)")
+```
+
+
+## Tabelle: Panresistente Gram-negative Keime
+
+```{r}
+cust_table(df_report, var)
+```
+
+
+# Multiresistente Gram negative Keime
+
+
+```{r mdr-gram-neg-histo}
+var <- "Multiresistente Gram negative Keime"
+comb_plot(df_report, var = var, 
+          caption = "\n(Enthält: Acinetobacter, Aeromonas, Alcaligenes, Burkholderia, Citrobacter, Enterobacter, Flavobacterium, Hafnia, Klebsiella,
+Morganella, Plesiomonas, Proteus, Providencia, Pseudomonas, Salmonella, Serratia, Shigella, Stenotrophomonas, Yersinia)")
+```
+
+
+
+## Tabelle: Multiresistente Gram negative Keime
+
+```{r mdr-gram-neg-tab}
+cust_table(df_report, var = var)
+```
+
+
+
+
+# Vancomycin resistente Enterkokokken (VRE)
+
+
+```{r vre-histo}
+var <- "VRE"
+comb_plot(df_report, var = var, caption = "\n(Vancomycin resistent)")
+```
+
+
+
+## Tabelle: VRE
+
+
+```{r vre-tab}
+cust_table(df_report, var = var)
+```
+
+
+
+# Carbapenemasebildner
+
+
+```{r carbapenemase-histo}
+var <- "Carbapenemasebildner"
+comb_plot(df_report, var = var, 
+          caption = "\n(Enthält panresistente und multiresistente Carbapenemase-Bildner (inkl. E. coli)")
+```
+
+
+## Tabelle: Carbapenemasebildner
+
+
+```{r carbapenemase-tab}
+cust_table(df_report, var = var)
+```
+
+
+
+
+# Clostridium difficle (ohne GT 027)
+
+
+```{r cdiff-histo}
+var <- "Clostridium difficile"
+comb_plot(df_report, var = var)
+```
+
+
+## Tabelle: Clostridium difficle (ohne GT 027)
+
+
+```{r cdiff-tab}
+cust_table(df_report, var = var)
+```
+
+
+
+
+# Clostridium difficle Genotyp 027
+
+
+```{r cdiff-027-by-year}
+var <- "Clostridium difficile 027"
+comb_plot(df_report, var = var)
+  
+```
+
+## Tabelle: Clostridium difficle Genotyp 027
+
+```{r}
+cust_table(df_report, var)
+```
+
+
