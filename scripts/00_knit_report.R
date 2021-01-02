@@ -19,4 +19,4 @@ source(here::here("scripts", "knit_report.R"))
 # Set knit_report("month", "year"). Make sure that under "report" there is a folder 
 # with the year entered in the function, e.g. report/2020/
 
-knit_report("dez", "2020")
+knit_report("jan", "2021")

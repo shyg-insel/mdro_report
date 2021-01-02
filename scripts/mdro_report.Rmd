@@ -227,7 +227,8 @@ cust_table <- function(df, var, start_year = 2018){
     border_outer(border = big_b) %>% 
     bold(part = "header") %>% 
     fontsize(size = 10, part = "body") %>% 
-    autofit()
+    autofit() %>% 
+    colformat_num(big.mark = "")
 }
 
 
