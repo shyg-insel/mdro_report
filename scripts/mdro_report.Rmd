@@ -80,7 +80,10 @@ df <- df %>%
 
 # Only consider groups as recoded above, rest of data is not of interest (CAVE, includes MDR TB)
 df_sub <- df %>% 
-  filter(!is.na(group))
+  filter(!is.na(group)) %>% 
+  filter(!str_detect(status, "(v|V)erdacht")) %>% # Exclude "Verdacht"
+  filter(!is.na(nosokomial)) # Exclude if not recorded whether transmission was nosokomial
+
 ```
 
 
@@ -128,7 +131,7 @@ CreateTableOne(vars = var,data = df_report,
                              "Missing", variables)) %>% 
   mutate(group = c("N", "Year (IQR)", 
                    rep("Erregergruppe (%)", 8), 
-                   rep("Nosokomial (%)", 3)),
+                   rep("Nosokomial (%)", 1)),
          Overall = str_replace(Overall, "\\[", "\\("), 
          Overall = str_replace(Overall, "\\]", "\\)"), 
          Overall = str_replace(Overall, "\\, ", " - ")) %>% 
@@ -168,7 +171,7 @@ CreateTableOne(vars = var, strata = "year", data = df_report %>% filter(year >= 
   filter(!variables %in% c("group (%)", "nosokomial (%)", "year (median [IQR])")) %>% 
   mutate(variables = if_else(variables %in% c("n", "year (median [IQR])"), "", variables),
          variables = if_else(str_detect(variables, "NA"), "Missing", variables)) %>% 
-  mutate(group = c("N", rep("Erregergruppe (%)", 8), rep("Nosokomial (%)", 3))) %>% 
+  mutate(group = c("N", rep("Erregergruppe (%)", 8), rep("Nosokomial (%)", 1))) %>% 
   mutate(across(`2017`:`2020`, ~str_replace(.x, "\\[", "\\(")),
          across(`2017`:`2020`, ~str_replace(.x, "\\]", "\\)")),
          across(`2017`:`2020`, ~str_replace(.x, "\\, ", " - "))) %>% 
@@ -204,7 +207,7 @@ m_grid <- expand_grid(month = 1:12,
 
 
 
-cust_table <- function(df, var, start_year = 2018){
+cust_table <- function(df, var, start_year = 2019){
   big_b <- fp_border(color="black", width = 0.5)
   
   df %>% 
@@ -242,7 +245,7 @@ histo_plot <- function(df, var) {
     mutate(nosokomial = fct_relevel(nosokomial, "Nein")) %>% 
     ggplot(aes(x = date, y = n)) + 
     geom_col(aes(fill = nosokomial), color = NA) +
-    scale_x_date(limits = dmy(c("18/12/2016", glue("01/12/{max_yr}"))),
+    scale_x_date(limits = dmy(c("18/12/2016", glue("31/12/{max_yr}"))),
                  date_breaks = "3 month", date_labels = "%b %Y") + 
     scale_fill_manual(values=c('steelblue', 'red3')) +
     labs(x = NULL, y = "Frequency\n", fill = "Nosokomial") +
@@ -468,12 +471,6 @@ cust_table(df_report, var = var)
 var <- "Clostridium difficile 027"
 comb_plot(df_report, var = var)
   
-```
-
-## Tabelle: Clostridium difficle Genotyp 027
-
-```{r}
-cust_table(df_report, var)
 ```
 
 
