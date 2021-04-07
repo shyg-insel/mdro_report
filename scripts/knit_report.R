@@ -10,7 +10,8 @@
 #'
 #' @examples
 #' knit_report("dez", "2020")
-knit_report <- function(month, year) {
+
+function(month, year) {
   rmarkdown::render(
     input = here::here("scripts", "mdro_report.Rmd"),
     output_file = here::here("report", year, glue::glue("mre_report_{month}_{year}.docx"))
