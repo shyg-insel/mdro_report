@@ -406,7 +406,7 @@ cust_table(df_report, var = var)
 
 
 
-# Vancomycin resistente Enterkokokken (VRE)
+# Vancomycin resistente Enterokokken (VRE)
 
 
 ```{r vre-histo}
@@ -445,7 +445,7 @@ cust_table(df_report, var = var)
 
 
 
-# Clostridium difficle (ohne GT 027)
+# Clostridium difficile (ohne GT 027)
 
 
 ```{r cdiff-histo}
@@ -454,7 +454,7 @@ comb_plot(df_report, var = var)
 ```
 
 
-## Tabelle: Clostridium difficle (ohne GT 027)
+## Tabelle: Clostridium difficile (ohne GT 027)
 
 
 ```{r cdiff-tab}
@@ -464,7 +464,7 @@ cust_table(df_report, var = var)
 
 
 
-# Clostridium difficle Genotyp 027
+# Clostridium difficile Genotyp 027
 
 
 ```{r cdiff-027-by-year}
